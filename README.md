@@ -1,2 +1,2 @@
 # creditrisk
-analysis on risk in credit market
+This project is meant to analyze credit markets. The dataset was obtained from Kaggle, it is synthetic data meant to replicate outstanding loans and bonds in the real market. This project is meant for myself to practice at building/training a model fit enough to properly analyze. Findings will then be produced within graphs and published. I stand to make no money or exposure and utilize the dataset within use terms. This is just for myself to practice and get up to date with Private Credit as of Mar, 2026.
