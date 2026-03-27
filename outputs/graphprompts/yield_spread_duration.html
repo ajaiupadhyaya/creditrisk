@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Yield Spread vs. Duration</title>
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+  <style>
+    body { margin: 0; background: #fff; font-family: "Helvetica Neue", Arial, sans-serif; }
+    #plot { width: 100%; min-height: 560px; }
+    header { padding: 28px 32px 0; max-width: 1200px; margin: 0 auto; }
+    h1 { font-size: 18px; font-weight: 600; margin: 0 0 6px; color: #111; letter-spacing: -0.02em; }
+    p { margin: 0; font-size: 13px; color: #57534e; max-width: 60ch; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Yield spread vs. duration — private credit instruments</h1>
+    <p>Synthetic book: bubble size = commitment; color = structural tier. Diagonal: illustrative IG public-market equivalent.</p>
+  </header>
+  <div id="plot"></div>
+  <script>
+(function () {
+  const tiers = ["Senior secured", "Unitranche", "Mezzanine", "Subordinated"];
+  const colors = {
+    "Senior secured": "#5c1f2a",
+    "Unitranche": "#c4a35a",
+    "Mezzanine": "#4a5f7a",
+    "Subordinated": "#e8e4dc"
+  };
+  const industries = ["Software", "Healthcare", "Industrials", "Retail", "Business services"];
+  const rng = (s) => () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+  let seed = 42;
+  const rand = rng(seed);
+  const n = 48;
+  const rows = Array.from({ length: n }, (_, i) => i).map(i => {
+    const tier = tiers[Math.floor(rand() * 4)];
+    return {
+      duration: 2 + rand() * 6,
+      spread: 280 + rand() * 520 + (tier === "Subordinated" ? 180 : 0),
+      size: 15 + rand() * 85,
+      tier,
+      name: "Facility " + (i + 1),
+      industry: industries[Math.floor(rand() * industries.length)],
+      vintage: 2018 + Math.floor(rand() * 7)
+    };
+  });
+
+  const traces = tiers.map(t => {
+    const pts = rows.filter(r => r.tier === t);
+    return {
+      type: "scatter",
+      mode: "markers",
+      name: t,
+      x: pts.map(r => r.duration),
+      y: pts.map(r => r.spread),
+      text: pts.map(r =>
+        `<b>${r.name}</b><br>${r.industry}<br>Spread: ${r.spread.toFixed(0)} bps<br>Vintage: ${r.vintage}`
+      ),
+      hovertemplate: "%{text}<extra></extra>",
+      marker: {
+        size: pts.map(r => 8 + Math.sqrt(r.size) * 1.4),
+        color: colors[t],
+        line: { color: "#1c1917", width: 0.5 },
+        opacity: 0.92
+      }
+    };
+  });
+
+  const x0 = 2, x1 = 8;
+  const y0 = 400 + 45 * x0, y1 = 400 + 45 * x1;
+
+  const layout = {
+    paper_bgcolor: "#fff",
+    plot_bgcolor: "#fff",
+    showlegend: true,
+    legend: { orientation: "h", y: 1.08, font: { family: "Arial Narrow, Arial, sans-serif", size: 11 } },
+    margin: { l: 56, r: 28, t: 72, b: 56 },
+    xaxis: {
+      title: { text: "Duration (years)", font: { family: "Arial Narrow, Arial, sans-serif", size: 12 } },
+      gridcolor: "#e7e5e4",
+      gridwidth: 1,
+      zeroline: false,
+      showline: false,
+      tickfont: { family: "Arial Narrow, Arial, sans-serif", size: 11 }
+    },
+    yaxis: {
+      title: { text: "Yield spread (bps)", font: { family: "Arial Narrow, Arial, sans-serif", size: 12 } },
+      gridcolor: "#e7e5e4",
+      zeroline: false,
+      showline: false,
+      tickfont: { family: "Arial Narrow, Arial, sans-serif", size: 11 }
+    },
+    shapes: [{
+      type: "line",
+      x0, x1, y0, y1,
+      line: { color: "rgba(120,113,108,0.35)", width: 1, dash: "4,3" }
+    }],
+    annotations: [{
+      x: 6.2,
+      y: 400 + 45 * 6.2 + 40,
+      text: "IG public equiv. (illustrative)",
+      showarrow: false,
+      font: { size: 10, color: "#78716c" }
+    }],
+    hovermode: "closest",
+    dragmode: "zoom"
+  };
+
+  const config = { responsive: true, displayModeBar: true, scrollZoom: true };
+  Plotly.newPlot("plot", traces, layout, config);
+})();
+  </script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Default rate timeline — recession bands</title>
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+  <style>
+    body { margin: 0; background: #fafaf9; }
+    header { padding: 32px 32px 8px; max-width: 960px; margin: 0 auto; }
+    h1 { font-family: Georgia, serif; font-size: 22px; font-weight: 400; margin: 0; color: #1c1917; text-align: left; }
+    p { margin: 10px 0 0; font-size: 13px; color: #57534e; font-style: italic; max-width: 58ch; }
+    #plot { width: 100%; min-height: 480px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Private credit default rate — through cycles</h1>
+    <p>Synthetic series for illustration. Shaded bands follow NBER recession windows.</p>
+  </header>
+  <div id="plot"></div>
+  <script>
+(function () {
+  const years = [];
+  for (let y = 2000; y <= 2026; y++) years.push(y);
+
+  function synthDr(y) {
+    let v = 1.8;
+    if (y >= 2007 && y <= 2009) v += 2.8 + (y === 2008 ? 1.2 : 0);
+    if (y >= 2020 && y <= 2021) v += 1.9;
+    if (y >= 2022) v += 0.35 * (y - 2022);
+    v += Math.sin(y * 0.4) * 0.35;
+    return Math.max(0.2, Math.min(7.5, v));
+  }
+
+  const dr = years.map(synthDr);
+
+  const recessions = [
+    { x0: 2001, x1: 2001.75, name: "2001" },
+    { x0: 2007.92, x1: 2009.5, name: "GFC" },
+    { x0: 2020.25, x1: 2020.42, name: "COVID" }
+  ];
+
+  const shapes = recessions.map(r => ({
+    type: "rect",
+    xref: "x",
+    yref: "paper",
+    x0: r.x0,
+    x1: r.x1,
+    y0: 0,
+    y1: 1,
+    fillcolor: "rgba(180, 83, 44, 0.22)",
+    line: { width: 0 },
+    layer: "below"
+  }));
+
+  const stressLines = [
+    { x: 2008.5, text: "Lehman — liquidity shock across leveraged loan desks." },
+    { x: 2020.33, text: "COVID — abrupt cash-flow stress; forbearance wave." },
+    { x: 2023.35, text: "Regional banking — tighter credit, mid-market spillover." }
+  ];
+
+  const annotations = stressLines.map(a => ({
+    x: a.x,
+    y: synthDr(Math.round(a.x)),
+    text: a.text,
+    showarrow: true,
+    arrowhead: 0,
+    ax: 0,
+    ay: -40,
+    font: { size: 10, family: "Georgia, serif", color: "#44403c" },
+    align: "left"
+  }));
+
+  const trace = {
+    x: years,
+    y: dr,
+    type: "scatter",
+    mode: "lines",
+    line: { color: "#0a0a0a", width: 3 },
+    hovertemplate: "%{x}<br>Default rate: %{y:.2f}%<extra></extra>"
+  };
+
+  const layout = {
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "#fafaf9",
+    margin: { l: 48, r: 28, t: 24, b: 48 },
+    showlegend: false,
+    xaxis: {
+      tickmode: "linear",
+      dtick: 2,
+      showgrid: false,
+      zeroline: false,
+      showline: false,
+      tickfont: { size: 11, color: "#57534e" }
+    },
+    yaxis: {
+      tickvals: [0, 2, 4, 6],
+      ticktext: ["0%", "2%", "4%", "6%"],
+      showgrid: true,
+      gridcolor: "rgba(0,0,0,0.06)",
+      zeroline: false,
+      showline: false,
+      range: [0, 7.2],
+      tickfont: { size: 11, color: "#57534e" }
+    },
+    shapes,
+    annotations,
+    hovermode: "x unified"
+  };
+
+  Plotly.newPlot("plot", [trace], layout, { responsive: true, displayModeBar: true });
+})();
+  </script>
+</body>
+</html>

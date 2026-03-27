@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Loan-to-value radial — portfolio</title>
+  <style>
+    body { margin: 0; background: #fff; font-family: system-ui, sans-serif; }
+    .frame { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 32px; }
+    svg { display: block; max-width: min(720px, 100vw); height: auto; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <svg id="svg" width="680" height="680" viewBox="0 0 680 680"></svg>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script>
+(function () {
+  const sectors = [
+    { name: "Technology", deals: [62, 58, 71, 55] },
+    { name: "Healthcare", deals: [48, 52, 65] },
+    { name: "Industrials", deals: [72, 68, 75, 60, 58] },
+    { name: "Consumer", deals: [54, 49, 63] }
+  ];
+  const flat = [];
+  sectors.forEach((s, si) => {
+    s.deals.forEach((ltv, di) => {
+      flat.push({
+        sector: s.name,
+        ltv,
+        months: 6 + (si + di) * 7 + (si * 11) % 24
+      });
+    });
+  });
+
+  const maxLtv = 80;
+  const color = d3.scaleSequential(d3.interpolateGreys).domain([6, 48]);
+
+  const cx = 340, cy = 340, rInner = 100, rOuter = 268;
+  const n = flat.length;
+  const anglePer = (Math.PI * 2) / n;
+
+  const svg = d3.select("#svg");
+  const g = svg.append("g").attr("transform", `translate(${cx},${cy})`);
+
+  const avgLtv = d3.mean(flat, d => d.ltv);
+
+  const rot = g.append("g").attr("class", "spokes-rot");
+
+  let idx = 0;
+  sectors.forEach(sec => {
+    const a0 = idx * anglePer - Math.PI / 2;
+    const a1 = (idx + sec.deals.length - 0.5) * anglePer - Math.PI / 2;
+    const mid = (a0 + a1) / 2;
+    const lr = rOuter + 32;
+    rot.append("text")
+      .attr("x", Math.cos(mid) * lr)
+      .attr("y", Math.sin(mid) * lr)
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .attr("fill", "#44403c")
+      .attr("font-size", 10)
+      .attr("transform", `rotate(${(mid * 180) / Math.PI + (mid > Math.PI / 2 ? 180 : 0)},${Math.cos(mid) * lr},${Math.sin(mid) * lr})`)
+      .text(sec.name);
+    idx += sec.deals.length;
+  });
+
+  let at = 0;
+  sectors.forEach((sec, si) => {
+    const a = at * anglePer - Math.PI / 2;
+    rot.append("line")
+      .attr("x1", Math.cos(a) * (rInner - 2))
+      .attr("y1", Math.sin(a) * (rInner - 2))
+      .attr("x2", Math.cos(a) * (rOuter + 8))
+      .attr("y2", Math.sin(a) * (rOuter + 8))
+      .attr("stroke", "#e7e5e4")
+      .attr("stroke-width", 1);
+    at += sec.deals.length;
+  });
+
+  flat.forEach((d, i) => {
+    const a = i * anglePer - Math.PI / 2 + anglePer * 0.46;
+    const len = (d.ltv / maxLtv) * (rOuter - rInner);
+    const x1 = Math.cos(a) * rInner;
+    const y1 = Math.sin(a) * rInner;
+    const x2 = Math.cos(a) * (rInner + len);
+    const y2 = Math.sin(a) * (rInner + len);
+    rot.append("line")
+      .attr("x1", x1).attr("y1", y1)
+      .attr("x2", x2).attr("y2", y2)
+      .attr("stroke", color(d.months))
+      .attr("stroke-width", 3)
+      .append("title")
+      .text(`${d.sector} · LTV ${d.ltv}% · ${d.months} mo since orig.`);
+  });
+
+  g.append("text")
+    .attr("text-anchor", "middle")
+    .attr("dominant-baseline", "middle")
+    .attr("fill", "#0a0a0a")
+    .attr("font-size", 52)
+    .attr("font-weight", 700)
+    .text(d3.format(".1f")(avgLtv) + "%");
+
+  g.append("text")
+    .attr("text-anchor", "middle")
+    .attr("y", 30)
+    .attr("fill", "#78716c")
+    .attr("font-size", 11)
+    .attr("letter-spacing", "0.08em")
+    .text("PORTFOLIO AVG LTV");
+
+  const start = performance.now();
+  function spin() {
+    const t = (performance.now() - start) / 1000;
+    const deg = (t / 60) * 360;
+    rot.attr("transform", `rotate(${deg})`);
+    requestAnimationFrame(spin);
+  }
+  requestAnimationFrame(spin);
+})();
+  </script>
+</body>
+</html>

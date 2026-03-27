@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deal Flow Waterfall — Private Credit Funnel</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #1a1a1a;
+      color: #f5f5f0;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    .chart-root { padding: 48px 40px 56px; max-width: 1480px; margin: 0 auto; }
+    h1 {
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      font-weight: 700;
+      font-size: clamp(26px, 3vw, 34px);
+      margin: 0 0 8px;
+      letter-spacing: -0.02em;
+      color: #fafaf8;
+    }
+    .subtitle {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-weight: 300;
+      font-size: 15px;
+      color: #a8a29e;
+      margin: 0 0 32px;
+      max-width: 52ch;
+      line-height: 1.5;
+    }
+    #chart { width: 100%; }
+    .tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: #0c0c0c;
+      color: #fafaf8;
+      border: 2px solid #f5f5f0;
+      padding: 12px 14px;
+      font-size: 12px;
+      line-height: 1.45;
+      box-shadow: 6px 6px 0 #000;
+      border-radius: 0;
+      max-width: 280px;
+      z-index: 10;
+    }
+    .tooltip strong { display: block; margin-bottom: 6px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="chart-root">
+    <h1>Private credit deal funnel</h1>
+    <p class="subtitle">Synthetic pipeline counts — each stage narrows toward a closed commitment. Hover for stage detail.</p>
+    <svg id="chart" width="1400" height="600" viewBox="0 0 1400 600" role="img" aria-label="Waterfall chart"></svg>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script>
+(function () {
+  const stages = [
+    { name: "Sourced", count: 240 },
+    { name: "Screened", count: 186 },
+    { name: "IC memo", count: 124 },
+    { name: "Committee", count: 82 },
+    { name: "Closed", count: 54 }
+  ];
+  const accent = "#f59e0b";
+  const chalk = "#fafaf8";
+  const margin = { top: 72, right: 48, bottom: 88, left: 56 };
+  const W = 1400, H = 600;
+  const iw = W - margin.left - margin.right;
+  const ih = H - margin.top - margin.bottom;
+  const max = d3.max(stages, d => d.count);
+  const x = d3.scaleBand()
+    .domain(stages.map(d => d.name))
+    .range([0, iw])
+    .padding(0.28);
+  const y = d3.scaleLinear().domain([0, max * 1.08]).range([ih, 0]);
+
+  const svg = d3.select("#chart");
+  const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+  g.append("g")
+    .attr("class", "axis-y")
+    .call(d3.axisLeft(y).ticks(5).tickFormat(d3.format("~s")))
+    .call(t => t.selectAll("text").attr("fill", "#78716c").attr("font-size", 11))
+    .call(t => t.selectAll("line, path").attr("stroke", "#44403c"));
+
+  const tooltip = d3.select("body").append("div").attr("class", "tooltip").style("opacity", 0);
+
+  const bars = g.selectAll("rect.bar")
+    .data(stages)
+    .join("rect")
+    .attr("class", "bar")
+    .attr("x", d => x(d.name))
+    .attr("y", ih)
+    .attr("width", x.bandwidth())
+    .attr("height", 0)
+    .attr("fill", chalk)
+    .attr("stroke", accent)
+    .attr("stroke-width", 2);
+
+  bars.transition()
+    .duration(900)
+    .ease(d3.easeCubicOut)
+    .delay((d, i) => i * 120)
+    .attr("y", d => y(d.count))
+    .attr("height", d => ih - y(d.count));
+
+  const labels = g.selectAll("text.val")
+    .data(stages)
+    .join("text")
+    .attr("class", "val")
+    .attr("text-anchor", "middle")
+    .attr("fill", chalk)
+    .attr("font-size", 13)
+    .attr("font-weight", 600)
+    .attr("opacity", 0)
+    .text(d => d.count);
+
+  labels.transition()
+    .duration(500)
+    .delay((d, i) => 400 + i * 120)
+    .attr("opacity", 1)
+    .attr("x", d => x(d.name) + x.bandwidth() / 2)
+    .attr("y", d => y(d.count) - 8);
+
+  const dropLabels = g.selectAll("text.drop")
+    .data(stages.slice(1))
+    .join("text")
+    .attr("class", "drop")
+    .attr("text-anchor", "middle")
+    .attr("fill", accent)
+    .attr("font-size", 12)
+    .attr("font-weight", 700)
+    .attr("opacity", 0)
+    .text((d, i) => {
+      const prev = stages[i].count;
+      const pct = ((d.count - prev) / prev) * 100;
+      return d3.format("+.1f")(pct) + "%";
+    });
+
+  dropLabels.transition()
+    .duration(400)
+    .delay((d, i) => 700 + i * 120)
+    .attr("opacity", 1)
+    .attr("x", (d, i) => x(d.name) + x.bandwidth() / 2)
+    .attr("y", (d, i) => (y(stages[i].count) + y(d.count)) / 2 + 4);
+
+  g.append("g")
+    .attr("transform", `translate(0,${ih})`)
+    .call(d3.axisBottom(x))
+    .call(t => t.selectAll("text")
+      .attr("fill", "#a8a29e")
+      .style("font-family", "system-ui, sans-serif")
+      .style("font-size", "12px"))
+    .call(t => t.selectAll("line, path").attr("stroke", "#44403c"));
+
+  bars
+    .on("mouseenter", function (event, d) {
+      d3.select(this).attr("fill", accent);
+      const prev = stages[stages.indexOf(d) - 1];
+      const drop = prev ? ((d.count - prev.count) / prev.count * 100) : null;
+      tooltip.style("opacity", 1).html(
+        `<strong>${d.name}</strong><br/>` +
+        `Opportunities: ${d.count}` +
+        (prev != null ? `<br/>vs prior: ${d3.format("+.1f")(drop)}%` : "")
+      );
+    })
+    .on("mousemove", event => {
+      tooltip
+        .style("left", (event.pageX + 14) + "px")
+        .style("top", (event.pageY - 10) + "px");
+    })
+    .on("mouseleave", function () {
+      d3.select(this).attr("fill", chalk);
+      tooltip.style("opacity", 0);
+    });
+})();
+  </script>
+</body>
+</html>

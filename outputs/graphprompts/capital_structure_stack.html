@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Capital structure stack</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #f7f5f0;
+      font-family: "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+      color: #1c1917;
+    }
+    .page { max-width: 960px; margin: 0 auto; padding: 36px 28px 48px; }
+    h1 { font-size: 20px; font-weight: 600; margin: 0 0 8px; letter-spacing: -0.02em; }
+    .dek { font-size: 13px; color: #57534e; margin: 0 0 20px; max-width: 60ch; }
+    .scroll { max-height: 720px; overflow-y: auto; border: 1px solid #d6d3cd; background: #fff; padding: 16px 12px 20px; }
+    svg { display: block; width: 100%; }
+    .tooltip {
+      position: fixed;
+      pointer-events: none;
+      background: #111;
+      color: #fafaf8;
+      border: 2px solid #fafaf8;
+      padding: 10px 12px;
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      line-height: 1.45;
+      box-shadow: 5px 5px 0 #000;
+      border-radius: 0;
+      z-index: 20;
+      opacity: 0;
+      transition: opacity 0.08s;
+    }
+    .tooltip strong { display: block; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Capital structure by deal</h1>
+    <p class="dek">Rows sorted by total commitment. Hover segments — slight lift via transform. Synthetic facility data.</p>
+    <div class="scroll">
+      <svg id="svg" viewBox="0 0 880 520"></svg>
+    </div>
+  </div>
+  <div id="tip" class="tooltip"></div>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script>
+(function () {
+  const layers = ["Revolver", "Senior term", "Unitranche", "Mezzanine", "Equity"];
+  const palette = {
+    "Revolver": "#9ca3af",
+    "Senior term": "#e7e5e4",
+    "Unitranche": "#b45309",
+    "Mezzanine": "#1c1917",
+    "Equity": "#f5f5f4"
+  };
+
+  const deals = [
+    { name: "Summit Packaging", parts: [40, 210, 95, 35, 22] },
+    { name: "Northline Logistics", parts: [25, 180, 120, 0, 15] },
+    { name: "Harbor Dental", parts: [15, 88, 44, 28, 10] },
+    { name: "Red Maple Software", parts: [30, 0, 200, 45, 30] },
+    { name: "Keystone Metals", parts: [20, 95, 60, 40, 18] },
+    { name: "Blue River Retail", parts: [35, 70, 0, 55, 12] },
+    { name: "Cedar Clinics", parts: [10, 55, 35, 20, 8] }
+  ].map(d => {
+    const total = d3.sum(d.parts);
+    return { ...d, total, stack: d.parts.map((v, i) => ({
+      layer: layers[i],
+      val: v,
+      rate: (8 + i * 1.2).toFixed(2) + "%",
+      mat: 2027 + (i % 4)
+    })) };
+  }).sort((a, b) => b.total - a.total);
+
+  const maxTot = d3.max(deals, d => d.total);
+  const rowH = 52;
+  const labelW = 168;
+  const barW = 640;
+  const W = labelW + barW + 48;
+  const H = deals.length * rowH + 32;
+
+  const svg = d3.select("#svg").attr("viewBox", `0 0 ${W} ${H}`);
+  const x = d3.scaleLinear().domain([0, maxTot]).range([0, barW]);
+
+  const tip = d3.select("#tip");
+  const g = svg.append("g").attr("transform", "translate(16,20)");
+
+  const rows = g.selectAll("g.row")
+    .data(deals)
+    .join("g")
+    .attr("class", "row")
+    .attr("transform", (d, i) => `translate(0,${i * rowH})`);
+
+  rows.append("text")
+    .attr("x", labelW - 8)
+    .attr("y", rowH / 2 + 4)
+    .attr("text-anchor", "end")
+    .attr("font-size", 12)
+    .attr("font-weight", 600)
+    .attr("fill", "#292524")
+    .text(d => d.name);
+
+  rows.each(function (deal, rowIndex) {
+    const row = d3.select(this);
+    let acc = 0;
+    deal.stack.forEach((seg, j) => {
+      if (seg.val <= 0) return;
+      const start = acc;
+      acc += seg.val;
+      const w = x(seg.val);
+      const x0 = labelW + x(start);
+      const segG = row.append("g").attr("transform", `translate(${x0},${rowH / 2 - 14})`);
+      segG.append("rect")
+        .attr("width", 0)
+        .attr("height", 28)
+        .attr("fill", palette[seg.layer])
+        .attr("stroke", "#44403c")
+        .attr("stroke-width", 0.5)
+        .transition()
+        .duration(700)
+        .delay(rowIndex * 70 + j * 38)
+        .attr("width", w);
+
+      segG
+        .on("mouseenter", function (event) {
+          d3.select(this).attr("transform", `translate(${x0},${rowH / 2 - 17})`);
+          tip.style("opacity", 1).html(
+            `<strong>${seg.layer}</strong><br/>` +
+            `Size: $${seg.val}M` +
+            `<br/>Rate: ${seg.rate}` +
+            `<br/>Maturity: ${seg.mat}`
+          );
+        })
+        .on("mousemove", event => {
+          tip.style("left", (event.clientX + 12) + "px").style("top", (event.clientY + 12) + "px");
+        })
+        .on("mouseleave", function () {
+          d3.select(this).attr("transform", `translate(${x0},${rowH / 2 - 14})`);
+          tip.style("opacity", 0);
+        });
+    });
+  });
+})();
+  </script>
+</body>
+</html>

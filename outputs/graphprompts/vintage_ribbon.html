@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vintage cohort ribbon — lifecycle</title>
+  <style>
+    body { margin: 0; background: #0f172a; color: #e2e8f0; font-family: system-ui, sans-serif; }
+    .wrap { padding: 40px 36px 48px; max-width: 1280px; margin: 0 auto; }
+    h1 { font-size: 13px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; margin: 0 0 24px; color: #94a3b8; }
+    svg { display: block; width: 100%; height: auto; max-width: 1100px; }
+    .note { margin-top: 20px; font-size: 12px; color: #64748b; max-width: 70ch; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Vintage cohorts — deployment to realization</h1>
+    <svg id="svg" viewBox="0 0 920 400" role="img" aria-label="Ribbon flow"></svg>
+    <p class="note">4s loop: ribbon widths reflect illustrative deployed capital. Export to GIF via screen capture at 24fps if needed.</p>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script>
+(function () {
+  const vintages = d3.range(2015, 2025);
+  const xs = [120, 460, 800];
+  const stageLabel = ["Deployment", "Harvesting", "Realization"];
+
+  const W = 920, H = 400;
+  const margin = { top: 48, right: 32, bottom: 28, left: 72 };
+  const iw = W - margin.left - margin.right;
+  const ih = H - margin.top - margin.bottom;
+
+  const baseY = d3.scaleBand().domain(vintages.map(String)).range([0, ih]).padding(0.15);
+
+  const svg = d3.select("#svg");
+  const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+  g.selectAll("text.st")
+    .data(stageLabel)
+    .join("text")
+    .attr("class", "st")
+    .attr("x", (d, i) => xs[i] - margin.left)
+    .attr("y", -18)
+    .attr("text-anchor", "middle")
+    .attr("fill", "#cbd5e1")
+    .attr("font-size", 11)
+    .attr("letter-spacing", "0.06em")
+    .text(d => d);
+
+  const flows = vintages.map((y, i) => ({
+    v: y,
+    w: [38 + i * 4, 28 + i * 3, 16 + i * 2]
+  }));
+
+  const defs = svg.append("defs");
+  flows.forEach((f, i) => {
+    const gr = defs.append("linearGradient").attr("id", "g" + i).attr("gradientUnits", "userSpaceOnUse")
+      .attr("x1", xs[0]).attr("x2", xs[2]);
+    gr.append("stop").attr("offset", "0%").attr("stop-color", "#0d9488");
+    gr.append("stop").attr("offset", "100%").attr("stop-color", "#d97706");
+  });
+
+  function pathFor(f, t) {
+    const y = baseY(String(f.v)) + baseY.bandwidth() / 2;
+    const pulse = 0.85 + 0.15 * t;
+    const w0 = f.w[0] * pulse, w1 = f.w[1] * pulse, w2 = f.w[2] * pulse;
+    const und = (u) => Math.sin((t * Math.PI * 2) + f.v * 0.2 + u) * 2.5;
+    const x0 = xs[0] - margin.left, x1 = xs[1] - margin.left, x2 = xs[2] - margin.left;
+    const top0 = y - w0 / 2 + und(0);
+    const bot0 = y + w0 / 2 + und(0);
+    const top1 = y - w1 / 2 + und(1);
+    const bot1 = y + w1 / 2 + und(1);
+    const top2 = y - w2 / 2 + und(2);
+    const bot2 = y + w2 / 2 + und(2);
+    return `M ${x0} ${top0}
+      L ${x1} ${top1}
+      L ${x2} ${top2}
+      L ${x2} ${bot2}
+      L ${x1} ${bot1}
+      L ${x0} ${bot0}
+      Z`;
+  }
+
+  const ribbons = g.selectAll("path.rb")
+    .data(flows)
+    .join("path")
+    .attr("class", "rb")
+    .attr("fill", (d, i) => "url(#g" + i + ")")
+    .attr("opacity", 0.82)
+    .attr("stroke", "none");
+
+  g.selectAll("text.vl")
+    .data(flows)
+    .join("text")
+    .attr("x", -8)
+    .attr("y", d => baseY(String(d.v)) + baseY.bandwidth() / 2 + 4)
+    .attr("text-anchor", "end")
+    .attr("fill", "#e2e8f0")
+    .attr("font-size", 11)
+    .text(d => d.v);
+
+  const start = performance.now();
+  const DURATION = 4000;
+  function frame(now) {
+    const t = ((now - start) % DURATION) / DURATION;
+    ribbons.attr("d", d => pathFor(d, t));
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+  </script>
+</body>
+</html>
