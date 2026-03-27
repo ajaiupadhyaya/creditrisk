@@ -1,0 +1,8 @@
+# Private credit fragility — regenerated CSVs (optional; remove ignores to commit snapshots)
+private_credit/data/*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
