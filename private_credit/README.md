@@ -27,25 +27,29 @@ private_credit/
 
 Use the repo [requirements.txt](../requirements.txt) (pandas, numpy, scipy, scikit-learn). Run from a venv that has those installed.
 
+`run_pipeline.py` looks for a project [`.venv`](../.venv): if you launch it with plain `python` (system interpreter) but `.venv` exists, it **re-executes** itself under `.venv/bin/python` so dependencies match `make private-credit`. Override with `PRIVATE_CREDIT_PYTHON=/path/to/python` to skip auto-selection.
+
 ## Run from repository root
 
 ```bash
-# Option A — full pipeline + fragility HTML report
+# Option A — full pipeline + fragility HTML report (uses .venv automatically when present)
 python private_credit/run_pipeline.py
 
-# Option B — step by step
-python private_credit/python/01_data_generator.py
-python private_credit/python/02_credit_models.py
-python private_credit/python/03_ml_classifier.py
-python -c "import sys; sys.path.insert(0,'src'); from private_credit_report import build_fragility_report; build_fragility_report()"
+# Option B — step by step (use .venv/bin/python if system Python has no deps)
+.venv/bin/python private_credit/python/01_data_generator.py
+.venv/bin/python private_credit/python/02_credit_models.py
+.venv/bin/python private_credit/python/03_ml_classifier.py
+.venv/bin/python -c "import sys; sys.path.insert(0,'src'); from private_credit_report import build_fragility_report; build_fragility_report()"
 ```
 
 Outputs:
 
 - CSVs under `private_credit/data/` (`loans.csv`, `rate_scenarios.csv`, `funds.csv`, `fragility_scores.csv`, `ml_predictions.csv`)
-- `outputs/private_credit/fragility_summary.html` (after `run_pipeline.py` or `build_fragility_report()`)
+- `outputs/private_credit/fragility_summary.html` (after `run_pipeline.py` or `build_fragility_report()`) — a multi-section **analytic atlas**: Plotly (tail risk, ICR ladders, heatmaps, maturity wall, macro tape, ML lift, fund stress, animated loss slider), Seaborn/Matplotlib static panels (KDE, joint plot, PIK path, correlations), and a D3.js animated NAV path chart for fund liquidity.
 
 The main hub [outputs/dashboard.html](../outputs/dashboard.html) links to the fragility report when that file exists.
+
+`02_credit_models.py` also writes `mc_summary.csv`, `mc_loss_samples.csv`, `icr_scenario_summary.csv`, `sector_icr.csv`, `maturity_wall.csv`, `pik_trajectory_example.csv`, `fund_liquidity.csv`, and `fund_nav_paths.csv` under `private_credit/data/` for the report (re-run credit models after changing the generator).
 
 ## Excel workbook
 

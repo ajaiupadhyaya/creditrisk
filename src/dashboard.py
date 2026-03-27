@@ -6,19 +6,30 @@ thesis-driven metrics (liquidity, macro, stress, vintage fragility).
 
 from __future__ import annotations
 
+import base64
+import io
+import json
 import warnings
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
+import seaborn as sns
 from plotly.offline import plot as plotly_plot
 from plotly.subplots import make_subplots
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import auc, precision_recall_curve, roc_curve
 
 warnings.filterwarnings("ignore")
+
+sns.set_theme(style="whitegrid", context="notebook", font_scale=0.95)
 
 # Editorial palette: NYT × MoMA — warm paper, ink, single accent
 THEME = {
@@ -595,6 +606,252 @@ class DashboardAssembler:
         fig.update_yaxes(title="Cumulative default rate (%)")
         return self._apply_theme(fig, "Vintage curves — base vs adverse PD overlay (recent cohorts)")
 
+    def _fig_treemap_ead(self) -> go.Figure:
+        df = self.loan_df.copy()
+        df["initial_rating"] = df["initial_rating"].astype(str)
+        df["sector"] = df["sector"].astype(str)
+        fig = px.treemap(
+            df,
+            path=[px.Constant("Portfolio"), "sector", "initial_rating"],
+            values="ead",
+            color="pd_annual",
+            color_continuous_scale=[[0, "#f7f5f0"], [0.5, "#d97706"], [1, "#7f1d1d"]],
+            hover_data={"ead": ":,.0f"},
+        )
+        fig.update_traces(textinfo="label+value+percent parent", marker=dict(line=dict(color=THEME["paper"], width=1)))
+        return self._apply_theme(fig, "Treemap — EAD nested by sector & rating (color = PD)")
+
+    def _fig_pd_violin(self) -> go.Figure:
+        df = self.loan_df.copy()
+        df["defaulted"] = df["defaulted"].map({0: "Performing", 1: "Defaulted"})
+        fig = px.violin(
+            df,
+            x="sector",
+            y="pd_annual",
+            color="defaulted",
+            box=True,
+            points=False,
+            color_discrete_map={"Performing": THEME["accent2"], "Defaulted": THEME["negative"]},
+        )
+        fig.update_layout(violinmode="group")
+        fig.update_yaxes(title="Annual PD", tickformat=".1%")
+        fig.update_xaxes(title="")
+        return self._apply_theme(fig, "PD distribution by sector — violin + box (outcome split)")
+
+    def _fig_origination_animation(self) -> go.Figure:
+        df = self.loan_df.copy()
+        if "origination_date" not in df.columns:
+            return self._apply_theme(go.Figure(), "Vintage formation")
+        df["year"] = pd.to_datetime(df["origination_date"], errors="coerce").dt.year
+        df = df.dropna(subset=["year"])
+        df["year"] = df["year"].astype(int)
+        years = sorted(df["year"].unique())
+        if len(years) < 2:
+            return self._apply_theme(go.Figure(), "Vintage formation")
+        cap = float(df["ead"].quantile(0.995))
+        fig = px.histogram(
+            df,
+            x="ead",
+            animation_frame="year",
+            nbins=50,
+            range_x=[0, cap],
+            color_discrete_sequence=[THEME["accent2"]],
+            title="",
+        )
+        fig.update_xaxes(title="EAD ($)", tickformat=",.0s")
+        fig.update_yaxes(title="Loan count")
+        try:
+            if getattr(fig.layout, "updatemenus", None) and len(fig.layout.updatemenus) > 0:
+                fig.layout.updatemenus[0].buttons[0].args[1]["frame"]["duration"] = 650
+        except Exception:
+            pass
+        return self._apply_theme(fig, "Exposure formation — EAD histogram by origination year (play)")
+
+    def _fig_parallel_coords(self) -> go.Figure:
+        df = self.loan_df.copy()
+        cols = ["ead", "coupon_rate", "pd_annual", "maturity_months", "leverage"]
+        if not all(c in df.columns for c in cols):
+            return self._apply_theme(go.Figure(), "Risk dimensions")
+        df = df[cols].dropna()
+        df = df.sample(min(4000, len(df)), random_state=42)
+        pd_color = df["pd_annual"].values
+        for c in cols:
+            lo, hi = df[c].min(), df[c].max()
+            df[c] = (df[c] - lo) / max(hi - lo, 1e-9)
+        df["pd_annual_color"] = pd_color
+        fig = px.parallel_coordinates(
+            df,
+            dimensions=cols,
+            color="pd_annual_color",
+            color_continuous_scale=[[0, THEME["positive"]], [0.5, THEME["accent"]], [1, THEME["negative"]]],
+        )
+        return self._apply_theme(fig, "Parallel coordinates — normalized risk geometry (color = PD)")
+
+    def _fig_density_pd_coupon(self) -> go.Figure:
+        df = self.loan_df.copy()
+        try:
+            fig = px.density_heatmap(
+                df,
+                x="coupon_rate",
+                y="pd_annual",
+                color_continuous_scale=[[0, "#fff"], [0.35, THEME["accent2"]], [1, THEME["negative"]]],
+                nbinsx=32,
+                nbinsy=32,
+                marginal_x="histogram",
+                marginal_y="histogram",
+            )
+        except Exception:
+            fig = px.density_contour(df, x="coupon_rate", y="pd_annual", color_continuous_scale=[[0, THEME["accent2"]], [1, THEME["negative"]]])
+        fig.update_xaxes(title="Coupon (%)")
+        fig.update_yaxes(title="Annual PD", tickformat=".1%")
+        return self._apply_theme(fig, "Joint density — coupon × PD (marginal histograms)")
+
+    def _fig_stress_funnel(self) -> go.Figure:
+        sa = self._load_sector_analysis()
+        if sa.empty or "scenario" not in sa.columns:
+            return self._apply_theme(go.Figure(), "Stress funnel")
+        tot = sa.groupby("scenario", as_index=False)["total_el"].sum()
+        order = ["baseline", "mild", "adverse", "severe", "gfc_like", "covid_like"]
+        tot["_o"] = tot["scenario"].astype(str).str.lower().map({v: i for i, v in enumerate(order)})
+        tot = tot.sort_values("_o", na_position="last")
+        tot = tot.sort_values("total_el", ascending=False)
+        colors = [THEME["accent2"] if "base" in str(s).lower() else THEME["accent"] for s in tot["scenario"]]
+        fig = go.Figure(
+            go.Funnel(
+                y=tot["scenario"].astype(str),
+                x=tot["total_el"] / 1e9,
+                textinfo="value+percent initial",
+                marker=dict(color=colors),
+                hovertemplate="<b>%{y}</b><br>EL: $%{x:.2f}B<extra></extra>",
+            )
+        )
+        fig.update_layout(yaxis=dict(categoryorder="total ascending"))
+        return self._apply_theme(fig, "Stress funnel — EL ($B) by scenario (ordered ladder)")
+
+    def _fig_scatter_3d_risk(self) -> go.Figure:
+        df = self.loan_df.copy()
+        if not {"pd_annual", "coupon_rate", "ead"}.issubset(df.columns):
+            return self._apply_theme(go.Figure(), "3D risk cloud")
+        sub = df.sample(min(6000, len(df)), random_state=42).copy()
+        sub["log_ead"] = np.log10(sub["ead"].clip(lower=1))
+        fig = px.scatter_3d(
+            sub,
+            x="pd_annual",
+            y="coupon_rate",
+            z="log_ead",
+            color="sector",
+            size="log_ead",
+            size_max=12,
+            opacity=0.32,
+            hover_data=["ead", "initial_rating"],
+        )
+        fig.update_layout(scene=dict(zaxis=dict(title="log10 EAD")))
+        fig.update_layout(scene=dict(xaxis=dict(tickformat=".0%"), yaxis=dict(title="Coupon %")))
+        return self._apply_theme(fig, "3D risk cloud — PD × coupon × EAD (color = sector)")
+
+    def _build_seaborn_embeds(self) -> str:
+        df = self.loan_df.copy()
+        out: List[str] = []
+        try:
+            fig1, ax1 = plt.subplots(figsize=(7.2, 4.2))
+            df_k = df.copy()
+            df_k["defaulted"] = df_k["defaulted"].map({0: "Performing", 1: "Defaulted"})
+            sns.kdeplot(data=df_k, x="pd_annual", hue="defaulted", fill=True, common_norm=False, alpha=0.45, ax=ax1, palette=[THEME["accent2"], THEME["negative"]])
+            ax1.set_xlabel("Annual PD")
+            ax1.set_title("PD density — defaulted vs performing (Seaborn)")
+            buf = io.BytesIO()
+            fig1.savefig(buf, format="png", dpi=130, bbox_inches="tight", facecolor=THEME["paper"])
+            plt.close(fig1)
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            out.append(f'<div class="img-card"><h4>Seaborn · PD KDE</h4><img src="data:image/png;base64,{b64}" alt="PD KDE" /></div>')
+
+            num_cols = [c for c in ["ead", "coupon_rate", "pd_annual", "maturity_months", "leverage", "interest_coverage"] if c in df.columns]
+            if len(num_cols) >= 4:
+                cm = df[num_cols].corr()
+                fig2, ax2 = plt.subplots(figsize=(5.8, 5))
+                sns.heatmap(cm, annot=True, fmt=".2f", cmap="RdBu_r", center=0, ax=ax2, vmin=-1, vmax=1)
+                ax2.set_title("Risk feature correlation (Seaborn)")
+                buf2 = io.BytesIO()
+                fig2.savefig(buf2, format="png", dpi=130, bbox_inches="tight", facecolor=THEME["paper"])
+                plt.close(fig2)
+                b64 = base64.b64encode(buf2.getvalue()).decode("ascii")
+                out.append(f'<div class="img-card"><h4>Seaborn · Correlation</h4><img src="data:image/png;base64,{b64}" alt="Correlation" /></div>')
+
+            if "credit_score" in df.columns:
+                fig3, ax3 = plt.subplots(figsize=(7, 3.8))
+                sns.scatterplot(
+                    data=df.sample(min(8000, len(df)), random_state=42),
+                    x="credit_score",
+                    y="pd_annual",
+                    hue="defaulted",
+                    alpha=0.35,
+                    palette=[THEME["accent2"], THEME["negative"]],
+                    ax=ax3,
+                )
+                ax3.set_title("Credit score vs PD (Seaborn)")
+                buf3 = io.BytesIO()
+                fig3.savefig(buf3, format="png", dpi=130, bbox_inches="tight", facecolor=THEME["paper"])
+                plt.close(fig3)
+                b64 = base64.b64encode(buf3.getvalue()).decode("ascii")
+                out.append(f'<div class="img-card"><h4>Seaborn · Score vs PD</h4><img src="data:image/png;base64,{b64}" alt="Score scatter" /></div>')
+        except Exception:
+            pass
+        return "".join(out)
+
+    def _build_d3_sector_html(self) -> str:
+        df = self.loan_df.groupby("sector", as_index=False)["ead"].sum()
+        df = df.sort_values("ead", ascending=False).head(14)
+        total = float(df["ead"].sum())
+        data = [{"sector": str(r["sector"])[:28], "ead": float(r["ead"]), "pct": float(r["ead"] / max(total, 1))} for _, r in df.iterrows()]
+        payload = json.dumps(data)
+        return f"""
+    <section class="section" id="d3-atlas">
+      <h2 class="section-title">IX — Concentration (D3.js)</h2>
+      <p class="section-dek">Animated horizontal bars — share of portfolio EAD by sector. Reinforces surface diversification vs. notional concentration.</p>
+      <div id="d3-sector-bars" class="d3-wrap"></div>
+      <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+      <script>
+      (function() {{
+        const data = {payload};
+        const margin = {{top: 16, right: 48, bottom: 16, left: 140}};
+        const rowH = 26;
+        const W = 900;
+        const H = margin.top + margin.bottom + data.length * rowH;
+        const maxE = d3.max(data, d => d.ead);
+        const x = d3.scaleLinear().domain([0, maxE]).range([0, W - margin.left - margin.right]);
+        const y = d3.scaleBand().domain(data.map(d => d.sector)).range([0, data.length * rowH]).padding(0.15);
+        const svg = d3.select("#d3-sector-bars").append("svg").attr("viewBox", `0 0 ${{W}} ${{H}}`).attr("class", "d3-svg");
+        const g = svg.append("g").attr("transform", `translate(${{margin.left}},${{margin.top}})`);
+        const fmt = d3.format(",.0f");
+        const bars = g.selectAll("rect").data(data).enter().append("rect")
+          .attr("y", d => y(d.sector))
+          .attr("height", y.bandwidth())
+          .attr("x", 0)
+          .attr("width", 0)
+          .attr("fill", "#1e3a5f")
+          .attr("rx", 2);
+        bars.transition().duration(900).delay((d,i) => i * 45).ease(d3.easeCubicOut).attr("width", d => x(d.ead));
+        g.selectAll("text.lab").data(data).enter().append("text")
+          .attr("class", "lab")
+          .attr("x", -8)
+          .attr("y", d => y(d.sector) + y.bandwidth() / 2)
+          .attr("text-anchor", "end")
+          .attr("dominant-baseline", "middle")
+          .attr("font-size", "11px")
+          .attr("fill", "#1c1917")
+          .text(d => d.sector);
+        g.selectAll("text.val").data(data).enter().append("text")
+          .attr("class", "val")
+          .attr("x", d => x(d.ead) + 8)
+          .attr("y", d => y(d.sector) + y.bandwidth() / 2)
+          .attr("dominant-baseline", "middle")
+          .attr("font-size", "11px")
+          .attr("fill", "#57534e")
+          .text(d => fmt(d.ead) + " (" + d3.format(".1%")(d.pct) + ")");
+      }})();
+      </script>
+    </section>"""
+
     def _fig_to_div(self, fig: go.Figure, include_js: bool) -> str:
         return plotly_plot(
             fig,
@@ -653,6 +910,7 @@ class DashboardAssembler:
             "V — Model": "Out-of-fold discrimination, calibration, and drivers from the gradient-boosting view.",
             "VI — Stress": "Scenario EL in dollars and as a share of EAD — fragility under macro shocks.",
             "VII — Cohorts": "Vintage curves with an adverse PD overlay — early performance vs stress amplification.",
+            "VIII — Atlas": "Depth, motion, and geometry — treemap, violins, animated vintage formation, joint densities, parallel coordinates, 3D cloud, stress funnel.",
         }
 
         figures: List[Tuple[str, str, go.Figure]] = []
@@ -674,6 +932,13 @@ class DashboardAssembler:
         figures.append(("VI — Stress", section_dek["VI — Stress"], self._fig_stress_sector_bar()))
         figures.append(("VI — Stress", section_dek["VI — Stress"], self._fig_stress_heatmap()))
         figures.append(("VII — Cohorts", section_dek["VII — Cohorts"], self._fig_vintage_overlay()))
+        figures.append(("VIII — Atlas", section_dek["VIII — Atlas"], self._fig_treemap_ead()))
+        figures.append(("VIII — Atlas", section_dek["VIII — Atlas"], self._fig_pd_violin()))
+        figures.append(("VIII — Atlas", section_dek["VIII — Atlas"], self._fig_origination_animation()))
+        figures.append(("VIII — Atlas", section_dek["VIII — Atlas"], self._fig_parallel_coords()))
+        figures.append(("VIII — Atlas", section_dek["VIII — Atlas"], self._fig_density_pd_coupon()))
+        figures.append(("VIII — Atlas", section_dek["VIII — Atlas"], self._fig_scatter_3d_risk()))
+        figures.append(("VIII — Atlas", section_dek["VIII — Atlas"], self._fig_stress_funnel()))
 
         fig_divs = []
         include_js = True
@@ -691,6 +956,18 @@ class DashboardAssembler:
             include_js = False
         if current_section is not None:
             fig_divs.append("</div></section>")
+
+        seaborn_wrap = ""
+        se = self._build_seaborn_embeds()
+        if se:
+            seaborn_wrap = (
+                '<section class="section">'
+                '<h2 class="section-title">Seaborn · Static atlas</h2>'
+                '<p class="section-dek">Publication-quality density, correlation, and bivariate structure — complements interactive Plotly above.</p>'
+                f'<div class="images atlas-grid">{se}</div></section>'
+            )
+
+        d3_block = self._build_d3_sector_html()
 
         extra_images = []
         for p in [
@@ -829,6 +1106,9 @@ class DashboardAssembler:
     .img-card {{ background: #fff; border: 1px solid var(--rule); padding: 12px; }}
     .img-card h4 {{ margin: 0 0 8px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }}
     .img-card img {{ width: 100%; border-radius: 2px; border: 1px solid var(--rule); }}
+    .atlas-grid {{ grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }}
+    .d3-wrap {{ background: #fff; border: 1px solid var(--rule); padding: 12px; min-height: 320px; overflow-x: auto; }}
+    .d3-svg {{ display: block; max-width: 100%; height: auto; }}
     .footer {{ margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--rule); font-size: 12px; color: var(--muted); text-align: center; }}
     @media (max-width: 960px) {{
       .grid {{ grid-template-columns: 1fr; }}
@@ -850,12 +1130,14 @@ class DashboardAssembler:
       <section class="kpis">{self._kpi_cards_html()}</section>
     </section>
     {''.join(fig_divs)}
+    {seaborn_wrap}
+    {d3_block}
     <section class="section">
       <h2 class="section-title">Supplementary diagnostics</h2>
       <p class="section-dek">Static exports from the modeling pipeline (confusion matrices, score separation, SHAP, heatmaps).</p>
       <div class="images">{''.join(extra_images)}</div>
     </section>
-    <div class="footer">Self-contained HTML · Plotly embedded · Generated {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}</div>
+    <div class="footer">Self-contained HTML · Plotly (incl. animations) · Seaborn · D3.js · Motion via sliders &amp; transitions (no heavy GIFs) · Generated {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}</div>
   </div>
 </body>
 </html>

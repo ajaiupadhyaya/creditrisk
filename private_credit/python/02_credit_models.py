@@ -15,6 +15,8 @@ from scipy.optimize import minimize_scalar
 import warnings
 warnings.filterwarnings('ignore')
 
+from pathlib import Path
+
 from paths import ensure_data_dir
 
 np.random.seed(42)
@@ -486,6 +488,106 @@ def compute_fragility_scores(loan_df, current_sofr=0.043):
                'icr_score', 'lev_score', 'pik_score', 'cov_score', 'mat_score']]
 
 
+def save_report_artifacts(
+    data_dir: Path,
+    mc_results: dict,
+    icr_results: dict,
+    sector_icr: pd.DataFrame,
+    quarter_wall: pd.DataFrame,
+    funds_df: pd.DataFrame,
+    traj_df: pd.DataFrame,
+) -> None:
+    """Write CSVs for the HTML fragility report (Plotly / D3 / Seaborn)."""
+    mc_rows = []
+    for scen, r in mc_results.items():
+        mc_rows.append({
+            'scenario': scen,
+            'el_mean': r['el_mean'],
+            'el_median': r['el_median'],
+            'var_95': r['var_95'],
+            'var_99': r['var_99'],
+            'cvar_95': r['cvar_95'],
+            'cvar_99': r['cvar_99'],
+            'max_loss': r['max_loss'],
+        })
+    pd.DataFrame(mc_rows).to_csv(data_dir / 'mc_summary.csv', index=False)
+
+    rng = np.random.RandomState(42)
+    loss_rows = []
+    for scen, r in mc_results.items():
+        ld = r['loss_distribution']
+        n = min(8000, len(ld))
+        if len(ld) > n:
+            idx = rng.choice(len(ld), n, replace=False)
+            ld = ld[idx]
+        for v in ld:
+            loss_rows.append({'scenario': scen, 'loss_pct': float(v)})
+    pd.DataFrame(loss_rows).to_csv(data_dir / 'mc_loss_samples.csv', index=False)
+
+    icr_rows = []
+    for label, r in icr_results.items():
+        icr_rows.append({
+            'scenario': label,
+            'sofr': r['sofr'],
+            'avg_icr': r['avg_icr'],
+            'median_icr': r['median_icr'],
+            'pct_below_1x': r['pct_below_1x'],
+            'pct_below_1_5x': r['pct_below_1_5x'],
+            'pct_below_2x': r['pct_below_2x'],
+            'notional_below_1_5x_mm': r['notional_below_1_5x'],
+        })
+    pd.DataFrame(icr_rows).to_csv(data_dir / 'icr_scenario_summary.csv', index=False)
+
+    sector_icr.to_csv(data_dir / 'sector_icr.csv')
+    qw = quarter_wall.copy()
+    if 'maturity_dt' in qw.columns:
+        qw['maturity_dt'] = qw['maturity_dt'].astype(str)
+    qw.to_csv(data_dir / 'maturity_wall.csv', index=False)
+    traj_df.to_csv(data_dir / 'pik_trajectory_example.csv', index=False)
+
+    redemption_scenarios = {
+        'mild (5% qtrly)': 0.05,
+        'elevated (8% qtrly)': 0.08,
+        'severe (11% qtrly)': 0.11,
+        'extreme (15% qtrly)': 0.15,
+    }
+    fund_metrics = []
+    nav_paths = []
+    for _, fund in funds_df.iterrows():
+        if fund['fund_type'] not in ('semi_liquid', 'bdc'):
+            continue
+        f = SemiLiquidFundStress(
+            name=fund['fund_name'],
+            nav_mm=fund['nav_mm'],
+            liquid_buffer_pct=fund['liquid_buffer_pct'],
+            gate_pct=fund['redemption_gate_pct'],
+        )
+        for label, rate in redemption_scenarios.items():
+            hist = f.simulate(rate)
+            gated_quarters = int(hist['gated'].sum())
+            nav_erosion = (f.nav - hist['nav_mm'].iloc[-1]) / f.nav
+            fund_metrics.append({
+                'fund_name': fund['fund_name'],
+                'fund_type': fund['fund_type'],
+                'scenario': label,
+                'redemption_rate_qtrly': rate,
+                'gated_quarters': gated_quarters,
+                'nav_erosion_pct': nav_erosion,
+            })
+            for _, h in hist.iterrows():
+                nav_paths.append({
+                    'fund_name': fund['fund_name'],
+                    'scenario': label,
+                    'quarter': int(h['quarter']),
+                    'nav_mm': float(h['nav_mm']),
+                    'gated': bool(h['gated']),
+                })
+    pd.DataFrame(fund_metrics).to_csv(data_dir / 'fund_liquidity.csv', index=False)
+    pd.DataFrame(nav_paths).to_csv(data_dir / 'fund_nav_paths.csv', index=False)
+    print("  Report artifacts: mc_summary, mc_loss_samples, icr_scenario_summary, sector_icr, "
+          "maturity_wall, pik_trajectory_example, fund_liquidity, fund_nav_paths")
+
+
 # ======================================================
 # MAIN RUNNER
 # ======================================================
@@ -510,6 +612,10 @@ if __name__ == '__main__':
     maturity_wall, wall_loans = analyze_maturity_wall(loan_df)
     run_fund_stress_test(funds_df)
     scores_df = compute_fragility_scores(loan_df)
+
+    save_report_artifacts(
+        data_dir, mc_results, icr_results, sector_icr, maturity_wall, funds_df, traj,
+    )
 
     # Save scored output
     scores_df.to_csv(data_dir / "fragility_scores.csv", index=False)
