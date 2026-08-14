@@ -18,3 +18,6 @@ Build a line chart in Plotly showing private credit default rates from 2000 to p
 
 7. Capital Structure Stack (Animated D3.js)
 Build a stacked horizontal bar chart where each row is a deal, and segments represent the capital structure layers: revolver, senior secured term loan, unitranche, mezzanine, and equity. Assign each layer a color from a disciplined, five-color palette inspired by architectural material samples — concrete gray, raw linen, oxidized copper, matte black, chalk. On hover, each segment should lift slightly (CSS transform translateY) and display a brutalist tooltip with tranche size, rate, and maturity. Animate the bars building from left to right on load using a staggered delay per row. Sort rows by total deal size descending. Left-align the deal name labels in a tight, condensed typeface. Canvas should be tall and scrollable if needed — no compression.
+
+
+Please provide a full, indepth and highly detailed breakdown of Private Credit sector. Provide context, examples, math, etc. in fully coherent and understandable way. Imagine if you are an analyst at JPM or Citadel or Jane Street and you are tasked to teach your co-workers about the sector and every nuiance within it. Furthermore, provide a full and complete explanation of the sector, the math, statistics, economics, CS, etc. 
