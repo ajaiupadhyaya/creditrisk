@@ -1,5 +1,9 @@
-.PHONY: private-credit
-
-# Run synthetic private-credit fragility pipeline (requires .venv with requirements.txt)
+PYTHON ?= python3
+.PHONY: analysis test private-credit
+analysis:
+	$(PYTHON) run_analysis.py
+test:
+	$(PYTHON) -m pytest tests -q
+# Legacy experimental track. Not the validated portfolio result.
 private-credit:
-	.venv/bin/python private_credit/run_pipeline.py
+	$(PYTHON) private_credit/run_pipeline.py

@@ -1,0 +1,22 @@
+name: Verify credit research
+on: [push, pull_request]
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-portfolio.txt
+      - run: python -m pytest tests -q
+      - run: python run_analysis.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: credit-research-aggregates
+          path: |
+            outputs/validated/REPORT.html
+            outputs/validated/REPORT.md
+            outputs/validated/summary.json
+            outputs/validated/sector_summary.csv
+            outputs/validated/stress_summary.csv
